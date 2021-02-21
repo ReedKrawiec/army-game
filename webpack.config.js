@@ -19,7 +19,8 @@ module.exports = (env)=> {
     extensions: [".ts", ".tsx", ".js"],
     alias:{
       "lib":path.resolve(__dirname,"src/lib"),
-      "game":path.resolve(__dirname,"src/game")
+      "game":path.resolve(__dirname,"src/game"),
+      "src":path.resolve(__dirname,"src")
     }
   },
   node: {

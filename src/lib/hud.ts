@@ -1,5 +1,5 @@
 import {obj} from "./object";
-
+import {Vector} from "lib/state";
 interface HudTextGetFunc{
   ():string
 }
@@ -21,10 +21,7 @@ export interface Font{
 
 export interface Text_Node{
   max_width?:number,
-  position:{
-    x:number,
-    y:number
-  }
+  position:Vector
   size:number;
   scaling:number;
   font:string;

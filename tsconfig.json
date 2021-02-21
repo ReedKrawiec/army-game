@@ -8,8 +8,9 @@
     "module":"CommonJS",
     "baseUrl": ".",
     "paths":{
-      "lib/*": ["src/lib/*"],
-      "game/*" : ["./src/game/*"]
+      "lib/*": ["./src/lib/*"],
+      "game/*" : ["./src/game/*"],
+      "src/*":["./src/*"]
     },
   },
   "lib": [

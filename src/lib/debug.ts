@@ -93,6 +93,19 @@ export class Debug_hud extends HUD {
       }
       return `:Y`
     }),
+    new Text({
+      position: {
+        x: viewport.width - 10,
+        y: viewport.height - 24
+      },
+      size: 22,
+      font: "Alata",
+      color: "white",
+      align: "right",
+      scaling: 1
+    }, () => {
+      return `${g.state.current_room.constructor.name}.ts`
+    })
     ];
   }
 }
@@ -116,9 +129,9 @@ export function debug_statef(t: number) {
         debug_state.selected_element.state.scaling.height = (2 * dist.y) / debug_state.selected_element.height;
       }
       else {
-        let st = debug_state.selected_element.state as unknown as obj_state;
+        let st = debug_state.selected_element.state;
         st.position.x = mouse.x - debug_state.selected_element_offset.x,
-          st.position.y = mouse.y - debug_state.selected_element_offset.y
+        st.position.y = mouse.y - debug_state.selected_element_offset.y
       }
     }
     if (PAUSED && debug_state.rotation_element) {
@@ -156,7 +169,9 @@ interface properties_element {
   sca_x: HTMLInputElement,
   sca_y: HTMLInputElement,
   render: HTMLInputElement,
-  collision: HTMLInputElement
+  collision: HTMLInputElement,
+  tags:HTMLInputElement,
+  layer:HTMLInputElement
 }
 let properties_elements: properties_element = undefined;
 if (DEBUG) {
@@ -169,7 +184,9 @@ if (DEBUG) {
     sca_x: (<HTMLInputElement>document.getElementById("sca_x")),
     sca_y: (<HTMLInputElement>document.getElementById("sca_y")),
     render: (<HTMLInputElement>document.getElementById("render")),
-    collision: (<HTMLInputElement>document.getElementById("collision"))
+    collision: (<HTMLInputElement>document.getElementById("collision")),
+    tags: (<HTMLInputElement>document.getElementById("tags")),
+    layer:(<HTMLInputElement>document.getElementById("layer"))
   }
 
   let inputs = document.getElementsByTagName("input");
@@ -263,6 +280,14 @@ if (DEBUG) {
     let ele = debug_state.selected_properties_element;
     ele.collision = properties_elements.collision.checked;
   })
+  properties_elements.tags.addEventListener("input", (e) => {
+    let ele = debug_state.selected_properties_element;
+    ele.tags = properties_elements.tags.value.split(",");
+  })
+  properties_elements.layer.addEventListener("input", (e) => {
+    let ele = debug_state.selected_properties_element;
+    ele.layer = parseInt(properties_elements.layer.value);
+  })
   document.getElementById("delete_element").addEventListener("click", (e) => {
     let ele = debug_state.selected_properties_element;
     ele.delete();
@@ -280,8 +305,10 @@ export function debug_update_properties_element() {
     properties_elements.rot.value = "" + ele.state.rotation.toFixed(2);
     properties_elements.sca_x.value = "" + ele.state.scaling.width.toFixed(2);
     properties_elements.sca_y.value = "" + ele.state.scaling.height.toFixed(2);
+    properties_elements.tags.value = "" + ele.tags.join(",");
     properties_elements.render.checked = ele.render;
     properties_elements.collision.checked = ele.collision;
+    properties_elements.layer.value = "" + ele.layer;
     let list = document.getElementById("params_list");
     list.textContent = '';
     for (let k of Object.keys(ele.params)) {
@@ -364,17 +391,12 @@ export async function debug_update_prefabs() {
     for (let obj of objs) {
       obj.UnbindAll();
     }
-
-    let filtered = objs.filter((a) => a.render);
+    let r = a.renderf(0);
+    
     return {
       prefab: prefabs[o],
       name: a.constructor.name,
-      rendered: filtered.map((o) => {
-        return {
-          name: o.constructor.name,
-          render: o.renderf(0)
-        }
-      })
+      rendered:r 
     };
 
   })
@@ -388,10 +410,10 @@ export async function debug_update_prefabs() {
     let para = document.createElement("p");
     para.appendChild(document.createTextNode(prefab.name));
     div.appendChild(para);
-    if (Array.isArray(prefab.rendered[0].render)) {
+    if (Array.isArray(prefab.rendered)) {
     }
     else {
-      div.append(prefab.rendered[0].render.sprite.sprite_sheet);
+      div.append(prefab.rendered.sprite.sprite_sheet);
     }
     div.classList.add("prefab_box");
     div.addEventListener("mousedown", async () => {
@@ -479,14 +501,14 @@ export let debug_setup = () => {
           return
         }
         debug_state.click_position = mouse;
-        let alL_clicked = g.getRoom().checkObjectsPoint(mouse);
+        let all_clicked = g.getRoom().checkObjectsPoint(mouse);
         let clicked;
-        let filtered = alL_clicked.filter((ele) => ele == debug_state.selected_properties_element)
+        let filtered = all_clicked.filter((ele) => ele == debug_state.selected_properties_element)
         if (filtered.length > 0) {
           clicked = filtered[0]
         }
         else {
-          clicked = alL_clicked[0];
+          clicked = all_clicked.sort((a, b) => (b.layer - a.layer))[0];
         }
         if (clicked) {
           if (held_keys["ControlLeft"]) {
@@ -641,7 +663,9 @@ export let debug_setup = () => {
       try {
         fs.writeFileSync(a, JSON.stringify(g.getRoom().exportStateConfig()));
       } catch (e) {
+        console.log(e);
         console.log("ERROR WRITING ROOM INFO FILE.");
+        alert("Error");
       }
       alert("Saved");
 

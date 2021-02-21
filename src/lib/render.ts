@@ -1,9 +1,10 @@
 import { sprite } from "./sprite";
 import { GetViewportDimensions } from "../van";
 import { obj } from "./object";
-import { dimensions, obj_state } from "./state";
+import { dimensions, obj_state, Vector } from "./state";
 import { Text_Node, TextSetting,HUD,Text } from "./hud";
 import {positioned_sprite} from "./sprite"
+import { Vec,rotation_length,angle_towards } from "./math";
 
 interface camera_state {
   scaling: number,
@@ -17,7 +18,12 @@ interface camera_state {
   },
   viewport: viewport,
   debug:boolean,
-  hud:HUD  
+  hud:HUD,
+  target_pos:Vector,
+  start_pos:Vector,
+  easing_time:number,
+  current_time:number,
+  speed:number
 }
 
 interface viewport {
@@ -35,7 +41,8 @@ interface camera_properties {
     width:number
   }
   scaling:number,
-  debug:boolean
+  
+  debug?:boolean
 }
 
 export class Camera {
@@ -56,9 +63,39 @@ export class Camera {
         height: v.height * props.dimensions.height
       },
       debug:props.debug,
-      hud
+      hud,
+      target_pos:undefined,
+      start_pos:undefined,
+      easing_time:0,
+      current_time:0,
+      speed:0
     }
     this.hud = hud;
+  }
+  statef(delta_time:number){
+    
+    if(this.state.target_pos){
+      let t = this.state.current_time/this.state.easing_time;
+      let distance = Vec.distance(this.state.position,this.state.target_pos);
+      let coeff;
+      if(t <= 0.5){
+        coeff = 2 * t * t;
+      }
+      else{
+        t -= 0.5;
+        coeff = 2 * t * (1 - t) + 0.5;
+      } 
+      let angle = angle_towards(this.state.target_pos,this.state.position);
+      let velocity = rotation_length(2 * this.state.speed * delta_time,angle);
+      velocity = Vec.scalar_mult(velocity,coeff);
+      this.state.position = Vec.add(this.state.position,velocity);
+      this.state.current_time += delta_time;
+      if(this.state.current_time > this.state.easing_time){
+        this.state.position = Vec.from(this.state.target_pos);
+        this.state.target_pos = undefined;
+      }
+    }
+    
   }
   set x(x: number) {
     this.state.position.x = x;
@@ -71,6 +108,14 @@ export class Camera {
   }
   get y() {
     return this.state.position.y;
+  }
+  moveTo(pos:Vector,time:number){
+    
+    this.state.speed = Vec.distance(this.state.position,pos)/time;
+    this.state.target_pos = pos;
+    this.state.start_pos = Vec.from(this.state.position);
+    this.state.easing_time = time;
+    this.state.current_time = 0;
   }
 
 }
@@ -126,8 +171,6 @@ export const hud_text_renderer = (r: renderer_args, s: TextSetting) => {
 export const text_renderer = (r:renderer_args,s:TextSetting) => {
   let camera = r.camera;
   let vheight = r.camera.state.dimensions.height;
-  let width = r.context.measureText(s.font.text).width * r.camera.state.scaling;
-  let height = s.font.size * 1.2 * r.camera.state.scaling;
   let final_x = ((s.x - camera.state.position.x + camera.state.dimensions.width * (1/r.camera.state.scaling) / 2) * r.camera.state.scaling);
   let final_y = ((vheight - s.y * camera.state.scaling - camera.state.dimensions.height/2 + camera.state.position.y * camera.state.scaling));
   r.context.font = `${s.font.size * r.camera.state.scaling}px ${s.font.font}`;
@@ -143,6 +186,32 @@ export const text_renderer = (r:renderer_args,s:TextSetting) => {
   }
   r.context.restore();
 }
+export interface canvas_args{
+  canvas:HTMLCanvasElement,
+  width:number;
+  height:number,
+  x:number,
+  y:number,
+  scale:dimensions
+}
+export const canvas_renderer = (r:renderer_args,a:canvas_args) => {
+  let camera = r.camera;
+  let vheight = r.camera.state.dimensions.height / r.camera.state.scaling;
+  let final_x = ((a.x - camera.state.position.x + camera.state.dimensions.width * (1/r.camera.state.scaling) / 2 - a.width * a.scale.width / 2) * r.camera.state.scaling);
+  let final_y = ((vheight - a.y - camera.state.dimensions.height * (1/r.camera.state.scaling) / 2 - a.height * a.scale.height / 2 + camera.state.position.y) * r.camera.state.scaling);
+  let height = a.height * r.camera.state.scaling * a.scale.height;
+  let width = a.width * r.camera.state.scaling * a.scale.width;
+  r.context.save();
+  r.context.translate(final_x  + (width) / 2, final_y + height / 2);
+  r.context.drawImage(
+    a.canvas,
+    -(width ) / 2,
+    -height / 2,
+    width,
+    height
+  )
+  r.context.restore();
+}
 
 export const sprite_renderer = (r: renderer_args, s: sprite_args) => {
   let camera = r.camera;
@@ -153,7 +222,7 @@ export const sprite_renderer = (r: renderer_args, s: sprite_args) => {
   let width = s.sprite.sprite_width * r.camera.state.scaling * s.scale.width;
   r.context.save();
   r.context.globalAlpha = s.sprite.opacity;
-  r.context.translate(final_x  + (width) / 2, final_y + height / 2)
+  r.context.translate(final_x  + (width) / 2, final_y + height / 2);
   let radians = s.rotation * (Math.PI / 180);
   r.context.rotate(radians);
   if(s.scale_type == scale_type.grow){
@@ -204,10 +273,32 @@ export const sprite_renderer = (r: renderer_args, s: sprite_args) => {
   r.context.restore();
 }
 
+export interface line{
+  start:Vector,
+  end:Vector
+}
+
+export const line_renderer = (context:CanvasRenderingContext2D,line:line,color:string,lineWidth:number,camera:Camera) => {
+  let vheight = camera.state.dimensions.height / camera.state.scaling;
+  let start_x = ((line.start.x - camera.state.position.x + camera.state.dimensions.width * (1/camera.state.scaling) / 2) * camera.state.scaling);
+  let start_y = ((vheight - line.start.y + camera.state.position.y - camera.state.dimensions.height * (1/camera.state.scaling) / 2) * camera.state.scaling);
+
+  let end_x = ((line.end.x - camera.state.position.x + camera.state.dimensions.width * (1/camera.state.scaling) / 2) * camera.state.scaling);
+  let end_y = ((vheight - line.end.y + camera.state.position.y - camera.state.dimensions.height * (1/camera.state.scaling) / 2) * camera.state.scaling);
+  
+  
+  context.beginPath();
+  context.strokeStyle = color;
+  context.lineWidth = lineWidth * camera.state.scaling;
+  context.moveTo(start_x,start_y);
+  context.lineTo(end_x,end_y);
+  context.stroke(); 
+}
+
 export const stroked_rect_renderer = (context: CanvasRenderingContext2D, rect: rectangle, x: number, y: number, color: string, lineWidth:number, camera: Camera) => {
   let vheight = camera.state.dimensions.height / camera.state.scaling;
   let final_x = ((x - camera.state.position.x + camera.state.dimensions.width * (1/camera.state.scaling) / 2 - rect.width / 2) * camera.state.scaling);
-  let final_y = ((vheight - y - rect.height / 2 - camera.state.dimensions.height * (1/camera.state.scaling) / 2 + camera.state.position.y) * camera.state.scaling);
+  let final_y = ((vheight - y + camera.state.position.y - camera.state.dimensions.height * (1/camera.state.scaling) / 2 - rect.height / 2 ) * camera.state.scaling);
   let height = rect.height * camera.state.scaling;
   let width = rect.width * camera.state.scaling;
   context.strokeStyle = color;

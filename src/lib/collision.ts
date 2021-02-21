@@ -1,6 +1,5 @@
 import {obj,getId} from "../lib/object";
 import {obj_state} from "../lib/state";
-import {deep} from "../van";
 
 export interface collision_box{
   x:number;
@@ -97,6 +96,7 @@ export function velocityCollisionCheck(object:obj,list:obj[]) {
   let st = object.state as obj_state;
   let x_vel = st.velocity.x;
   let y_vel = st.velocity.y;
+  if(x_vel == 0 && y_vel == 0) return;
   if(!ob.collision){
     (<obj_state>ob.state).position.x += (<obj_state>ob.state).velocity.x;
     (<obj_state>ob.state).position.y += (<obj_state>ob.state).velocity.y;
@@ -112,7 +112,7 @@ export function velocityCollisionCheck(object:obj,list:obj[]) {
     };
     let vel = velocity_max(st.velocity.x,box,list,ob.id,direction.right);
     if(vel > 0){
-      st.position.x += vel;
+      st.position.x = st.position.x + vel
     }
     else{
       st.velocity.x = 0;  
@@ -127,7 +127,7 @@ export function velocityCollisionCheck(object:obj,list:obj[]) {
     }
     let vel = velocity_max(st.velocity.x,box,list,ob.id,direction.left);
     if(vel < 0){
-      st.position.x += vel;
+      st.position.x = st.position.x + vel
     }
     else{
       st.velocity.x = 0; 
@@ -142,7 +142,7 @@ export function velocityCollisionCheck(object:obj,list:obj[]) {
     }
     let vel = velocity_max(st.velocity.y,box,list,ob.id,direction.up);
     if(vel > 0){
-      st.position.y += vel;
+      st.position.y = st.position.y + vel;
     }
     else{
       st.velocity.y = 0;
@@ -157,7 +157,7 @@ export function velocityCollisionCheck(object:obj,list:obj[]) {
     }
     let vel = velocity_max(st.velocity.y,box,list,ob.id,direction.down);
     if(vel < 0){
-      st.position.y += vel;
+      st.position.y = st.position.y + vel;
     }
     else{
       st.velocity.y = 0;

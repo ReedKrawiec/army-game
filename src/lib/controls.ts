@@ -29,6 +29,7 @@ interface keyBinds{
   [key:string]: Array<control_func>
 }
 let target = document.getElementById("target");
+/*
 export function init_click_handler(game:game<unknown>){
   window.addEventListener("click",(e)=>{
     
@@ -73,7 +74,7 @@ export function init_click_handler(game:game<unknown>){
     }  
   })
 }
-
+*/
 
 window.addEventListener("mousedown", (e) => {
   e.preventDefault();

@@ -13,5 +13,5 @@ interface globals{
 export let g = new game<globals>(canvas_element.getContext("2d"),{
 });
 
-g.loadRoomString("example");
+g.loadRoomString("bf1");
 

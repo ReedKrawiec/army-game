@@ -1,13 +1,15 @@
 export let DEBUG = process.env.NODE_ENV === 'dev';
 export let PAUSED = process.env.NODE_ENV === 'dev';
-import { obj} from "./lib/object";
+import { obj } from "./lib/object";
 import { room } from "./lib/room";
 import { collision_box } from "./lib/collision";
-import { sprite_renderer, rect_renderer, stroked_rect_renderer, hud_text_renderer, Camera, text_renderer ,scale_type} from "./lib/render";
+import { sprite_renderer, rect_renderer, stroked_rect_renderer, hud_text_renderer, Camera, text_renderer, scale_type, line, line_renderer, canvas_renderer } from "./lib/render";
 import { ExecuteRepeatBinds, Unbind } from "./lib/controls";
-import { init_click_handler } from "./lib/controls";
-import { debug_state, debug_update_room_list, debug_update_obj_list,debug_update_prefabs, debug_statef, debug_setup } from "./lib/debug";
+import { debug_state, debug_update_room_list, debug_update_obj_list, debug_update_prefabs, debug_statef, debug_setup } from "./lib/debug";
+import { positioned_sprite } from "lib/sprite";
 import { rooms as room_list } from "./game/rooms/rooms";
+import { Vec } from "lib/math";
+
 
 
 let canvas_element: HTMLCanvasElement = document.getElementById("target") as HTMLCanvasElement;
@@ -67,9 +69,15 @@ export const render_collision_box = (a: collision_box) => {
   boxes.push(a);
 }
 
+let lines: line[] = [];
+
+export const render_line = (a: line) => {
+  lines.push(a);
+}
+
 let boxes: Array<collision_box> = [];
 
-export let deep = (a: any) => {
+export let copy = (a: any) => {
   return JSON.parse(JSON.stringify(a));
 }
 
@@ -94,6 +102,8 @@ export class game<T>{
   //onscreen canvas, in the proper position in the viewport
   offscreen_canvas: HTMLCanvasElement;
   offscreen_context: CanvasRenderingContext2D;
+  static_canvas: HTMLCanvasElement;
+  static_context: CanvasRenderingContext2D;
   prototypes: Array<obj> = [];
   rooms: Array<any> = [];
   isRendering = false;
@@ -109,6 +119,8 @@ export class game<T>{
     }
     this.offscreen_canvas = document.createElement("canvas");
     this.offscreen_context = this.offscreen_canvas.getContext("2d");
+    this.static_canvas = document.createElement("canvas");
+    this.static_context = this.static_canvas.getContext("2d");
     //DEBUG determines whether the game is running within the editor
     if (DEBUG) {
       //Sets up some global debug state and the editor keybindings
@@ -124,23 +136,23 @@ export class game<T>{
       }, 16.66)
     }
     //Creates a onclick function on the window that handles element onclick functions
-    init_click_handler(this);
+    //init_click_handler(this);
   }
   render(t: number) {
     //t is current render time
     let delta_time = t - last_render_time
     last_render_time = t;
-    let all_cameras = this.state.cameras;
+    let all_cameras = [...this.state.cameras,...this.state.current_room.cameras];
     let editor_camera_index = -1;
     if (DEBUG) {
       debug_state.render_delta_time = delta_time;
       all_cameras = [...all_cameras, debug_state.camera]
       editor_camera_index = all_cameras.length - 1;
-      if(all_cameras.length === 1){
+      if (all_cameras.length === 1) {
         this.state.context.fillStyle = "white"
         this.state.context.font = "50px Arial"
         this.state.context.textAlign = "center";
-        this.state.context.fillText("NO CAMERA", viewport.width/2, viewport.height/2);
+        this.state.context.fillText("NO CAMERA", viewport.width / 2, viewport.height / 2);
       }
       //The editor camera is always the last camera inside the cameras array
       //the editor camera is rendered to a different canvas than the main game canvas
@@ -167,17 +179,19 @@ export class game<T>{
         width: camera.state.dimensions.width * (1 / camera.state.scaling),
         height: camera.state.dimensions.height * (1 / camera.state.scaling)
       };
+      let room = this.state.current_room;
       //List of all particles within the camera's fov
+      let cords = room.proximity_map.getCordsFromBox(camera_box);
+      let to_check = room.proximity_map.getObjectsFromCords(cords);
       let particle_collides = this.state.current_room.checkObjects(camera_box, [], this.state.current_room.particles_arr);
       //List of all objects within the camera's fov
-      let camera_colliders = [...this.state.current_room.checkObjects(camera_box), ...particle_collides];
-
+      let camera_colliders = [...this.state.current_room.checkObjects(camera_box, [], to_check), ...particle_collides];
       let render_args = {
         context: this.offscreen_context,
         camera: camera,
       };
       //Renders the room's background.
-      if(this.state.current_room.render){
+      if (this.state.current_room.render) {
         sprite_renderer(render_args, {
           sprite: this.state.current_room.renderf(delta_time),
           x: 0,
@@ -187,29 +201,44 @@ export class game<T>{
             width: 1,
             height: 1
           },
-          scale_type:scale_type.grow
+          scale_type: scale_type.grow
         });
       }
+      canvas_renderer(render_args, {
+        canvas: this.static_canvas,
+        width: this.state.current_room.proximity_map.length,
+        height: this.state.current_room.proximity_map.length,
+        x: 0,
+        y: 0,
+        scale: { width: 1, height: 1 }
+      })
       //Array of hitboxes for each item in the room
       let hitboxes: collision_box[] = [];
-      for (let a of camera_colliders.filter((b) => b.render).sort((a, b) => (a.layer - b.layer))) {
+      for (let a of camera_colliders.filter((b) => b.render && !b.static).sort((a, b) => (a.layer - b.layer))) {
         let rendered = a.renderTrack(t);
 
         //Objects can return either a sprite, or an array of sprites to simplify the API
         //For the user, and for use in composite objects(object that bundles other objects together)
         //Internally, we convert any single sprite into an array of one sprite.
 
-
-        for (let positioned_sprite of rendered)
+        
+        for (let positioned_sprite of rendered) {
           sprite_renderer(render_args, {
             sprite: positioned_sprite.sprite,
             x: positioned_sprite.x,
             y: positioned_sprite.y,
             rotation: a.state.rotation,
             scale: a.state.scaling,
-            scale_type:a.scale_type
+            scale_type: a.scale_type
           });
-
+        }
+        for (let node of a.text_nodes) {
+          text_renderer(render_args, {
+            x: node.state.position.x,
+            y: node.state.position.y,
+            font: node.renderf(t)
+          })
+        }
 
         //Hitboxes are rendered late in the render loop, to ensure objects don't overlap them
         //As we render objects, we add their hitboxes to this list
@@ -240,7 +269,7 @@ export class game<T>{
                 y: positioned_sprite.y,
                 rotation: graphic.state.rotation,
                 scale: graphic.state.scaling,
-                scale_type:graphic.scale_type
+                scale_type: graphic.scale_type
               });
             }
           }
@@ -257,7 +286,12 @@ export class game<T>{
       //  hitboxes, and potentially update the editor
       if (camera.state.debug) {
         let box: collision_box;
-        let boxes_copy = [...boxes]
+        let boxes_copy = [...boxes];
+        let lines_copy = [...lines];
+        while (lines_copy.length > 0) {
+          let line = lines_copy.pop();
+          line_renderer(this.offscreen_context, line, "orange", 10, camera);
+        }
         while (boxes_copy.length > 0) {
           let box = boxes_copy.pop();
           let rect = {
@@ -278,9 +312,10 @@ export class game<T>{
         //inside the editor UI
         if (DEBUG && debug_state.selected_properties_element) {
           let coll = debug_state.selected_properties_element.getFullCollisionBox();
-          rect_renderer(this.offscreen_context, { width: 25, height: 25 }, coll.x, coll.y, "skyblue", 10, camera);
+          rect_renderer(this.offscreen_context, { width: 5, height: 5 }, coll.x, coll.y, "skyblue", 10, camera);
           stroked_rect_renderer(this.offscreen_context, coll, coll.x, coll.y, "blue", 1, camera);
         }
+        stroked_rect_renderer(this.offscreen_context, { width: this.state.current_room.proximity_map.length, height: this.state.current_room.proximity_map.length }, 0, 0, "purple", 10, camera);
       }
       //Separate canvas for the editor camera
       if (a !== editor_camera_index) {
@@ -290,22 +325,31 @@ export class game<T>{
         debug_state.target.getContext("2d").drawImage(this.offscreen_canvas, camera.state.viewport.x, camera.state.viewport.y);
       }
     }
-    if (DEBUG)
+    if (DEBUG) {
       boxes = [];
-    requestAnimationFrame((a) => { this.render(a) });
+      lines = [];
+    }
+    requestAnimationFrame((a) => {
+      if (this.isRendering)
+        this.render(a)
+    });
   }
   start_logic(a: number) {
     //this is the room's state loop
     return window.setInterval(() => {
       let new_time = new Date();
       if (!PAUSED) {
-        
+
         let time_since = new_time.getTime() - last_time.getTime();
-        
-        if (this.state.current_room) {
-          this.state.current_room.statef(time_since);
-          if (this.state.current_room.hud) {
-            this.state.current_room.hud.statef(time_since);
+        let room = this.state.current_room;
+        if (room) {
+          room.statef(time_since);
+          if(this.state.cameras){
+            for(let cameras of this.state.cameras){
+              if(cameras.hud){
+                cameras.hud.statef(time_since);
+              } 
+            } 
           }
         }
       }
@@ -321,6 +365,7 @@ export class game<T>{
     //room list is a object that contains each room's class,
     //with the room's name as the key for class
     //This object is populated at compile time
+    this.state.cameras = [];
     for (let a of Object.keys(room_list)) {
       if (a == x) {
         //this isn't particularly type-safe.
@@ -329,15 +374,51 @@ export class game<T>{
       }
     }
   }
-
+  redrawStatics() {
+    let room_length = this.state.current_room.proximity_map.length;
+    let statics = this.state.current_room.objects.filter(u => u.static);
+    this.static_canvas.width = room_length;
+    this.static_canvas.height = room_length;
+    this.static_context.clearRect(0, 0, room_length, room_length);
+    let static_cam = new Camera({
+      x: 0,
+      y: 0,
+      dimensions: { height: room_length, width: room_length },
+      scaling: 1,
+      debug: false
+    }, {
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1
+    })
+    statics.forEach((u) => {
+      let rendered = u.renderTrack(u.last_render);
+      for (let r of rendered) {
+        sprite_renderer({
+          context: this.static_context,
+          camera: static_cam
+        }, {
+          sprite: r.sprite,
+          x: r.x,
+          y: r.y,
+          rotation: u.state.rotation,
+          scale: u.state.scaling,
+          scale_type: u.scale_type
+        });
+      }
+    })
+  }
   async loadRoom(x: room<unknown>) {
     //Clears the room's logic loop if one
     //Was already running
+    this.isRendering = false;
     if (this.state.logic) {
       window.clearInterval(this.state.logic);
     }
     //This reference is used during initialization
     x.game = this;
+
     //Deletes each object in the room (which also unbinds their binds),
     //and unbinds the room's bindings.
     if (this.state.current_room !== undefined) {
@@ -348,12 +429,18 @@ export class game<T>{
         Unbind(id);
       }
     }
-    let new_room = await x.load();
+    await x.load();
+    for (let c of x.config.objects) {
+      //This handles loading objects from the saved json file associated with each room.
+      await x.addItemStateConfig(c)
+    }
     x.registerControls();
     x.registerParticles();
-
-    this.state.logic = this.start_logic(logic_loop_interval)
     this.state.current_room = x;
+    this.state.current_room.initialize();
+    this.redrawStatics();
+    this.state.logic = this.start_logic(logic_loop_interval)
+
     if (DEBUG) {
       debug_update_room_list();
       debug_update_prefabs();
@@ -362,9 +449,12 @@ export class game<T>{
 
 
     if (!this.isRendering) {
+      this.isRendering = true;
       //This starts the render loop for the room
       this.render(0);
-      this.isRendering = true;
+
+
     }
+
   }
 }
